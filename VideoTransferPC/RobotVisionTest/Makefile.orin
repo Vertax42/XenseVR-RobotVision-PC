@@ -1,0 +1,72 @@
+###############################################################################
+#
+# Standalone Makefile for RobotVisionConsole
+# Self-contained build configuration
+#
+###############################################################################
+
+# Compiler settings
+CXX = g++
+APP := RobotVisionConsole
+
+# Source files
+SRCS := main.cpp \
+	../src/H264Encoder.cpp \
+	../src/H264Decoder.cpp \
+	../src/FFmpegUtils.cpp \
+	../src/H264NALUParser.cpp \
+	../src/CameraDataReceiver.cpp \
+	../src/CameraDataSender.cpp \
+	../src/NetworkVideoSource.cpp
+
+OBJS := $(SRCS:.cpp=.o)
+
+# Include paths
+CPPFLAGS := -std=c++17 \
+	-I../../asio-1.30.2/include \
+	-I../src \
+	-I/usr/local/zed/include \
+	-I/usr/include/opencv4 \
+	-I/usr/local/cuda/include
+
+# Compiler flags
+CXXFLAGS := -Wall -Wextra -O2 -g
+
+# FFmpeg flags
+CXXFLAGS += $(shell pkg-config --cflags libavcodec libavformat libavutil libswscale libavdevice 2>/dev/null || echo "")
+
+# Library paths and libraries
+LDFLAGS := -L/usr/local/zed/lib \
+	-L/usr/local/cuda/lib64
+	# -L/usr/lib/aarch64-linux-gnu
+
+# FFmpeg libraries (must come first to avoid conflicts)
+LDFLAGS += $(shell pkg-config --libs libavcodec libavformat libavutil libswscale libavdevice 2>/dev/null || echo "-lavcodec -lavformat -lavutil -lswscale -lavdevice")
+
+# Core libraries
+LDFLAGS += -lsl_zed \
+	-lcuda -lcudart \
+	-lopencv_core -lopencv_imgproc -lopencv_videoio -lopencv_imgcodecs \
+	-lpthread
+
+all: $(APP)
+
+debug: CXXFLAGS += -DDEBUG -g3 -O0
+debug: $(APP)
+
+%.o: %.cpp
+	@echo "Compiling: $<"
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $< -o $@
+
+$(APP): $(OBJS)
+	@echo "Linking: $@"
+	$(CXX) -o $@ $(OBJS) $(LDFLAGS)
+
+clean:
+	rm -rf $(APP) $(OBJS)
+
+install: $(APP)
+	@echo "Installing $(APP)..."
+	install -D $(APP) /usr/local/bin/$(APP)
+
+.PHONY: all debug clean install
