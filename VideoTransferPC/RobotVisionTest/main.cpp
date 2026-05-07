@@ -519,7 +519,20 @@ int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string& serve
     auto run = [&](CameraDataSender& sender) {
         avdevice_register_all();
 
-        auto encoder_callback = [&sender](const uint8_t* data, size_t size) {
+        // Per-session instrumentation state. Shared via shared_ptr so the
+        // encoder_callback lambda (captured by value, by-copy of the shared_ptr)
+        // sees the same counters across calls; works under asio post() too.
+        struct SessionStats {
+            uint64_t nalus_sent = 0;
+            uint64_t bytes_sent = 0;
+            uint64_t idr_count  = 0;
+            std::chrono::steady_clock::time_point first_send;
+            std::chrono::steady_clock::time_point last_log;
+            bool started = false;
+        };
+        auto session_state = std::make_shared<SessionStats>();
+
+        auto encoder_callback = [&sender, session_state](const uint8_t* data, size_t size) {
             if (size == 0 || data == nullptr) {
                 OutputDebugStringA("Encoder callback received empty data.\n");
                 return;
@@ -536,12 +549,68 @@ int runH264TCPCameraCaptureTest(int argc, char* argv[], const std::string& serve
             // Copy NALU data
             std::copy(data, data + size, packet.begin() + 4);
 
+            // Detect NAL type from Annex-B payload (skip 4-byte start code).
+            // Type 5 = IDR slice (keyframe). Treat anything ≥ 30 KB as a probable IDR
+            // even if libx264 hasn't packed start code first (extra-data path).
+            uint8_t nal_type = 0;
+            if (size >= 5 && data[0] == 0x00 && data[1] == 0x00 &&
+                data[2] == 0x00 && data[3] == 0x01) {
+                nal_type = data[4] & 0x1F;
+            }
+            const bool is_idr = (nal_type == 5) || (size >= 30 * 1024);
+
             // --- Catch SendDataException here ---
             try {
                 // Send the length-prefixed packet
                 sender.sendData(reinterpret_cast<const char*>(packet.data()), static_cast<uint32_t>(packet.size()));
+
+                // Bookkeeping after a successful send.
+                auto now = std::chrono::steady_clock::now();
+                if (!session_state->started) {
+                    session_state->first_send = now;
+                    session_state->last_log   = now;
+                    session_state->started    = true;
+                    printf("[stream] first NALU sent (size=%zu, nal_type=%u)\n",
+                           size, (unsigned)nal_type);
+                    fflush(stdout);
+                }
+                session_state->nalus_sent++;
+                session_state->bytes_sent += packet.size();
+                if (is_idr) session_state->idr_count++;
+
+                // Print a progress line at most once per second.
+                auto since_log = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    now - session_state->last_log).count();
+                if (since_log >= 1000) {
+                    auto since_start = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        now - session_state->first_send).count();
+                    double secs = since_start / 1000.0;
+                    double mbps = secs > 0 ? (session_state->bytes_sent * 8.0 / 1e6) / secs : 0.0;
+                    printf("[stream] %lus  nalus=%lu  idr=%lu  bytes=%.2f MB  rate=%.2f Mbps\n",
+                           (unsigned long)(since_start / 1000),
+                           (unsigned long)session_state->nalus_sent,
+                           (unsigned long)session_state->idr_count,
+                           session_state->bytes_sent / 1024.0 / 1024.0,
+                           mbps);
+                    fflush(stdout);
+                    session_state->last_log = now;
+                }
             }
             catch (const SendDataException& e) {
+                // Dump the session stats before exit so we can correlate
+                // broken-pipe timing with what was actually sent.
+                if (session_state->started) {
+                    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - session_state->first_send).count();
+                    fprintf(stderr,
+                            "[stream] DROPPED after %lu NALUs (%lu IDR), %.2f MB, %.3f s alive — %s\n",
+                            (unsigned long)session_state->nalus_sent,
+                            (unsigned long)session_state->idr_count,
+                            session_state->bytes_sent / 1024.0 / 1024.0,
+                            elapsed / 1000.0, e.what());
+                } else {
+                    fprintf(stderr, "[stream] DROPPED on first send — %s\n", e.what());
+                }
                 printErrorAndQuit(e.what()); // Call the function to print error and quit
             }
             catch (const std::exception& e) { // Catch any other standard exceptions
