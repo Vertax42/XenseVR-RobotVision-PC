@@ -1,1 +1,14 @@
+# Build artifacts (Windows)
 /VideoTransferPC/RobotVisionTest/build_release
+/VideoTransferPC/VideoPlayer/build_release
+
+# Build artifacts (Linux Makefile.orin)
+*.o
+/VideoTransferPC/RobotVisionTest/RobotVisionConsole
+
+# Test outputs
+/VideoTransferPC/RobotVisionTest/captured_frames.yuv
+/VideoTransferPC/RobotVisionTest/decoded_frames.yuv
+/VideoTransferPC/RobotVisionTest/frame.jpg
+/VideoTransferPC/RobotVisionTest/Messages.dblog
+/VideoTransferPC/RobotVisionTest/output.csv
