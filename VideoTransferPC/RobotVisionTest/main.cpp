@@ -327,8 +327,11 @@ int RunSimpleCameraCaptureTest(char* captureDevice, int resolution_width, int re
 
     while (continue_capture) {
         if (zed.grab() == sl::ERROR_CODE::SUCCESS) {
-            // Retrieve image in RGBA format
-            zed.retrieveImage(zed_image, sl::VIEW::SIDE_BY_SIDE, sl::MEM::GPU);
+            // Retrieve image in RGBA format. MUST use MEM::CPU here:
+            // convertRBGAToYUV (FFmpegUtils.cpp) reads via getPtr<MEM::CPU>,
+            // and a MEM::GPU retrieve leaves CPU memory un-mapped, producing
+            // a null/garbage pointer and an empty/corrupt YUV file.
+            zed.retrieveImage(zed_image, sl::VIEW::SIDE_BY_SIDE, sl::MEM::CPU);
 
             // Convert sl::Mat (RGBA) to YUV (I420/YUV420p)
             std::vector<uint8_t> y_plane, u_plane, v_plane;
