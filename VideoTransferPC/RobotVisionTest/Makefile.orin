@@ -22,7 +22,9 @@ SRCS := main.cpp \
 OBJS := $(SRCS:.cpp=.o)
 
 # Include paths
-CPPFLAGS := -std=c++17 \
+# NOTE: use += so that env-provided CPPFLAGS (e.g. conda's
+# -I$CONDA_PREFIX/targets/x86_64-linux/include for CUDA headers) is preserved.
+CPPFLAGS += -std=c++17 \
 	-I../../asio-1.30.2/include \
 	-I../src \
 	-I/usr/local/zed/include \
@@ -30,14 +32,20 @@ CPPFLAGS := -std=c++17 \
 	-I/usr/local/cuda/include
 
 # Compiler flags
-CXXFLAGS := -Wall -Wextra -O2 -g
+CXXFLAGS += -Wall -Wextra -O2 -g
 
 # FFmpeg flags
 CXXFLAGS += $(shell pkg-config --cflags libavcodec libavformat libavutil libswscale libavdevice 2>/dev/null || echo "")
 
 # Library paths and libraries
-LDFLAGS := -L/usr/local/zed/lib \
-	-L/usr/local/cuda/lib64
+# NOTE: use += so that env-provided LDFLAGS (conda's -L$CONDA_PREFIX/lib +
+# -L$CONDA_PREFIX/targets/x86_64-linux/lib + rpath) is preserved.
+# /usr/lib/x86_64-linux-gnu is needed when building under conda gcc, whose
+# sysroot does not include the system Debian/Ubuntu multi-arch lib path
+# (where apt-installed libopencv_*.so etc. live).
+LDFLAGS += -L/usr/local/zed/lib \
+	-L/usr/local/cuda/lib64 \
+	-L/usr/lib/x86_64-linux-gnu
 	# -L/usr/lib/aarch64-linux-gnu
 
 # FFmpeg libraries (must come first to avoid conflicts)
